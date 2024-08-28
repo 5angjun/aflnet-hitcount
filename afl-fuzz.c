@@ -95,6 +95,9 @@
 /* Lots of globals, but mostly for the status UI and other things where it
    really makes no sense to haul them around as function parameters. */
 
+unsigned int case_visited = 0;
+#define TOTAL_CASES 21
+u8 hit_count[TOTAL_CASES];
 
 EXP_ST u8 *in_dir,                    /* Input directory with test cases  */
           *out_file,                  /* File to fuzz, if any             */
@@ -3928,6 +3931,13 @@ static u8* describe_op(u8 hnb) {
 
   if (hnb == 2) strcat(ret, ",+cov");
 
+  sprintf(ret + strlen(ret), ",mut:");
+  for (int j = 0; j < TOTAL_CASES; j++) {
+    if (case_visited & (1U << j)) {
+      sprintf(ret + strlen(ret), "%d_", j);
+      hit_count[j]++;
+    }
+  }
   return ret;
 
 }
@@ -4101,7 +4111,6 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault) {
 
       fn = alloc_printf("%s/replayable-hangs/id:%06llu,%s", out_dir,
                         unique_hangs, describe_op(0));
-
 #else
 
       fn = alloc_printf("%s/replayable-hangs/id_%06llu", out_dir,
@@ -4347,7 +4356,8 @@ static void write_stats_file(double bitmap_cvg, double stability, double eps) {
     fprintf(f, "peak_rss_mb       : %zu\n", usage.ru_maxrss >> 10);
 #endif /* ^__APPLE__ */
   }
-
+  for(int i=0;i<=TOTAL_CASES;i++)
+    fprintf(f,"case %d: %d\n",i,hit_count[i]);
   fclose(f);
 
 }
@@ -7021,33 +7031,29 @@ havoc_stage:
     u32 use_stacking = 1 << (1 + UR(HAVOC_STACK_POW2));
 
     stage_cur_val = use_stacking;
-
+    case_visited = 0;
     for (i = 0; i < use_stacking; i++) {
 
       switch (UR(15 + 2 + (region_level_mutation ? 4 : 0))) {
 
         case 0:
-
           /* Flip a single bit somewhere. Spooky! */
-
+          case_visited |= (1 << 0);
           FLIP_BIT(out_buf, UR(temp_len << 3));
           break;
 
         case 1:
-
           /* Set byte to interesting value. */
-
+          case_visited |= (1 << 1);
           out_buf[UR(temp_len)] = interesting_8[UR(sizeof(interesting_8))];
           break;
 
         case 2:
-
           /* Set word to interesting value, randomly choosing endian. */
 
           if (temp_len < 2) break;
-
           if (UR(2)) {
-
+            
             *(u16*)(out_buf + UR(temp_len - 1)) =
               interesting_16[UR(sizeof(interesting_16) >> 1)];
 
@@ -7057,15 +7063,14 @@ havoc_stage:
               interesting_16[UR(sizeof(interesting_16) >> 1)]);
 
           }
-
+          case_visited |= (1 << 2);
           break;
 
         case 3:
-
           /* Set dword to interesting value, randomly choosing endian. */
 
           if (temp_len < 4) break;
-
+          case_visited |= (1 << 3);
           if (UR(2)) {
 
             *(u32*)(out_buf + UR(temp_len - 3)) =
@@ -7081,25 +7086,22 @@ havoc_stage:
           break;
 
         case 4:
-
           /* Randomly subtract from byte. */
-
+          case_visited |= (1 << 4);
           out_buf[UR(temp_len)] -= 1 + UR(ARITH_MAX);
           break;
 
         case 5:
-
           /* Randomly add to byte. */
-
+          case_visited |= (1 << 5);
           out_buf[UR(temp_len)] += 1 + UR(ARITH_MAX);
           break;
 
         case 6:
-
           /* Randomly subtract from word, random endian. */
 
           if (temp_len < 2) break;
-
+          case_visited |= (1 << 6);
           if (UR(2)) {
 
             u32 pos = UR(temp_len - 1);
@@ -7119,9 +7121,8 @@ havoc_stage:
           break;
 
         case 7:
-
           /* Randomly add to word, random endian. */
-
+          case_visited |= (1 << 7);
           if (temp_len < 2) break;
 
           if (UR(2)) {
@@ -7143,11 +7144,10 @@ havoc_stage:
           break;
 
         case 8:
-
           /* Randomly subtract from dword, random endian. */
 
           if (temp_len < 4) break;
-
+          case_visited |= (1 << 8);
           if (UR(2)) {
 
             u32 pos = UR(temp_len - 3);
@@ -7167,11 +7167,10 @@ havoc_stage:
           break;
 
         case 9:
-
           /* Randomly add to dword, random endian. */
 
           if (temp_len < 4) break;
-
+          case_visited |= (1 << 9);
           if (UR(2)) {
 
             u32 pos = UR(temp_len - 3);
@@ -7191,16 +7190,14 @@ havoc_stage:
           break;
 
         case 10:
-
           /* Just set a random byte to a random value. Because,
              why not. We use XOR with 1-255 to eliminate the
              possibility of a no-op. */
-
+          case_visited |= (1 << 10);
           out_buf[UR(temp_len)] ^= 1 + UR(255);
           break;
 
         case 11 ... 12: {
-
             /* Delete bytes. We're making this a bit more likely
                than insertion (the next option) in hopes of keeping
                files reasonably small. */
@@ -7208,7 +7205,8 @@ havoc_stage:
             u32 del_from, del_len;
 
             if (temp_len < 2) break;
-
+            case_visited |= (1 << 11);
+            case_visited |= (1 << 12);
             /* Don't delete too much. */
 
             del_len = choose_block_len(temp_len - 1);
@@ -7225,9 +7223,9 @@ havoc_stage:
           }
 
         case 13:
-
+          
           if (temp_len + HAVOC_BLK_XL < MAX_FILE) {
-
+            case_visited |= (1 << 13);
             /* Clone bytes (75%) or insert a block of constant bytes (25%). */
 
             u8  actually_clone = UR(4);
@@ -7275,14 +7273,13 @@ havoc_stage:
           break;
 
         case 14: {
-
             /* Overwrite bytes with a randomly selected chunk (75%) or fixed
                bytes (25%). */
 
             u32 copy_from, copy_to, copy_len;
 
             if (temp_len < 2) break;
-
+            case_visited |= (1 << 14);
             copy_len  = choose_block_len(temp_len - 1);
 
             copy_from = UR(temp_len - copy_len + 1);
@@ -7305,7 +7302,7 @@ havoc_stage:
 
         case 15: {
             if (extras_cnt + a_extras_cnt == 0) break;
-
+            case_visited |= (1 << 15);
             /* Overwrite bytes with an extra. */
 
             if (!extras_cnt || (a_extras_cnt && UR(2))) {
@@ -7343,7 +7340,7 @@ havoc_stage:
 
         case 16: {
             if (extras_cnt + a_extras_cnt == 0) break;
-
+            case_visited |= (1 << 16);
             u32 use_extra, extra_len, insert_at = UR(temp_len + 1);
             u8* new_buf;
 
@@ -7400,7 +7397,7 @@ havoc_stage:
             u32 src_region_len = 0;
             u8* new_buf = choose_source_region(&src_region_len);
             if (new_buf == NULL) break;
-
+            case_visited |= (1 << 17);
             //replace the current region
             ck_free(out_buf);
             out_buf = new_buf;
@@ -7429,6 +7426,7 @@ havoc_stage:
             ck_free(src_region);
             out_buf = new_buf;
             temp_len += src_region_len;
+            case_visited |= (1 << 18);
             break;
           }
 
@@ -7437,7 +7435,7 @@ havoc_stage:
             u32 src_region_len = 0;
             u8* src_region = choose_source_region(&src_region_len);
             if (src_region == NULL) break;
-
+            
             if (temp_len + src_region_len >= MAX_FILE) {
               ck_free(src_region);
               break;
@@ -7453,13 +7451,14 @@ havoc_stage:
             ck_free(src_region);
             out_buf = new_buf;
             temp_len += src_region_len;
+            case_visited |= (1 << 19);
             break;
           }
 
         /* Duplicate the current region */
         case 20: {
             if (temp_len * 2 >= MAX_FILE) break;
-
+            case_visited |= (1 << 20);
             u8* new_buf = ck_alloc_nozero(temp_len * 2);
 
             memcpy(new_buf, out_buf, temp_len);
