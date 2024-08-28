@@ -276,7 +276,7 @@ struct queue_entry {
   u32 generating_state_id;            /* ID of the start at which the new seed was generated */
   u8 is_initial_seed;                 /* Is this an initial seed */
   u32 unique_state_count;             /* Unique number of states traversed by this queue entry */
-
+  u64 fuzzed_cnt;
 };
 
 static struct queue_entry *queue,     /* Fuzzing queue (linked list)      */
@@ -4042,7 +4042,7 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault) {
     }
 
     queue_top->exec_cksum = hash32(trace_bits, MAP_SIZE, HASH_CONST);
-
+    queue_top->fuzzed_cnt = 0;
     /* Try to calibrate inline; this also calls update_bitmap_score() when
        successful. */
 
@@ -4356,8 +4356,19 @@ static void write_stats_file(double bitmap_cvg, double stability, double eps) {
     fprintf(f, "peak_rss_mb       : %zu\n", usage.ru_maxrss >> 10);
 #endif /* ^__APPLE__ */
   }
-  for(int i=0;i<=TOTAL_CASES;i++)
+  for(int i=0;i<TOTAL_CASES;i++)
     fprintf(f,"case %d: %d\n",i,hit_count[i]);
+
+
+    static struct queue_entry *tmp_entry_point;
+    tmp_entry_point = queue;
+    int i=0;
+    while (tmp_entry_point) {
+      if(tmp_entry_point->fuzzed_cnt!=0)
+        fprintf(f,"seed %d: %llu\n",i,tmp_entry_point->fuzzed_cnt);
+      tmp_entry_point = tmp_entry_point->next;
+
+    }
   fclose(f);
 
 }
@@ -9304,7 +9315,7 @@ int main(int argc, char** argv) {
           }
         }
       }
-
+      queue_cur->fuzzed_cnt++;
       skipped_fuzz = fuzz_one(use_argv);
 
       if (!stop_soon && sync_id && !skipped_fuzz) {
