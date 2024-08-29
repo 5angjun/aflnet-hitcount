@@ -4367,7 +4367,7 @@ static void write_stats_file(double bitmap_cvg, double stability, double eps) {
       if(tmp_entry_point->fuzzed_cnt!=0)
         fprintf(f,"seed %d: %llu\n",i,tmp_entry_point->fuzzed_cnt);
       tmp_entry_point = tmp_entry_point->next;
-
+      i++;
     }
   fclose(f);
 
